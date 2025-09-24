@@ -4,12 +4,13 @@ Authors: Heng Wang (wheng2025@lzu.edu.cn) and Weihua Deng (dengwh@lzu.edu.cn)
 
 Address: School of Mathematics and Statistics, State Key Laboratory of Natural Product Chemistry, Lanzhou University, Lanzhou 730000, China.
 
+# Constraint-Informed BSDE method
+
+![Neural network architecture](./figures/nn.png)
+
 # Environment configuration
 
 python==3.13.5 torch==2.8.0+cu126
-
-# Constraint-Informed BSDE method
-![Neural network architecture](./figures/nn.png)
 
 # Abstract
 The deep backward stochastic differential equation (BSDE) method is a deep learning algorithm for solving high-dimensional global partial differential equations (PDEs), which is trained using the sampled trajectories of microscopic stochastic processes; 
