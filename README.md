@@ -13,11 +13,11 @@ Address: School of Mathematics and Statistics, State Key Laboratory of Natural P
 python==3.13.5 torch==2.8.0+cu126
 
 # Abstract
-The deep backward stochastic differential equation (BSDE) method is a deep learning algorithm for solving high-dimensional global partial differential equations (PDEs), which is trained using the sampled trajectories of microscopic stochastic processes; 
-however, it is incapable of solving the problems in local and manifold domains. 
-To overcome this issue, we propose a strategy compliant with BSDE theory in this paper, termed the Constraint-Informed BSDE method. 
-The key idea of the Constraint-Informed BSDE method is to construct appropriate stochastic processes based on the physical implications of boundary conditions and manifold constraints, and further derive the BSDEs that the solutions to the corresponding PDEs satisfies. 
-Specifically, we derive the BSDEs satisfied by the solutions of PDEs with Neumann and Dirichlet boundary conditions, and PDEs on sphere. 
+The deep backward stochastic differential equation (BSDE) method is a deep learning algorithm for solving high-dimensional partial differential equations (PDEs) in the whole space, which is trained using the sampled trajectories of microscopic stochastic processes;
+however, generally it is incapable of solving the problems on a manifold or with boundary constraints.
+To overcome this issue, we propose a strategy compliant with BSDE theory in this paper, termed the Constraint-Informed BSDE method.
+The key idea of the Constraint-Informed BSDE method is to first construct appropriate stochastic processes based on the physical implications of boundary conditions and manifold constraints, and further derive the BSDEs that the solutions to the corresponding PDEs satisfy.
+Specifically, we derive the BSDEs satisfied by the solutions of PDEs with Neumann and Dirichlet boundary conditions on multi-fold sphere and in high-dimensional domain.
 Finally, we demonstrate the performance of the Constraint-Informed BSDE method through extensive numerical experiments.
 Since there is no need to explicitly incorporate boundary conditions into the loss function, Constraint-Informed BSDE method exhibits sufficient accuracy, stability, and strong robustness.
 
