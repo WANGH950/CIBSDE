@@ -1,16 +1,17 @@
 import torch
 import torch.nn as nn
 import cibsde.utils as utils
-import time
+from tqdm import tqdm
 
 class CIBSDE(nn.Module):
-    def __init__(self, d, t, f, mu, sigma, pc, data_gen, N, refb, hitb, param=False):
+    def __init__(self, d, t, f, mu, sigma, h, pc, data_gen, N, refb, hitb, param=False):
         super().__init__()
         self.d = d
         self.t = t
         self.f = f
         self.mu = mu
         self.sigma = sigma
+        self.h = h
         self.pc = pc
         self.data_gen = data_gen
         self.N = N
@@ -20,11 +21,6 @@ class CIBSDE(nn.Module):
         self.dt = t / N
         self.ones = nn.Parameter(torch.ones([1]),requires_grad=False)
         self.zeros = nn.Parameter(torch.zeros([1]),requires_grad=False)
-
-    def mirror_reflect(self, xt):
-        xb, nb, out = self.refb(xt)
-        xt[out] = xt[out] + 2*((xb[out]-xt[out])*(-nb[out])).sum(dim=1,keepdim=True)*(-nb[out])
-        return xt
     
     def T_inv(self, xt):
         B = xt.shape[0]
@@ -38,8 +34,8 @@ class CIBSDE(nn.Module):
 
 
 class BoundaryIBSDE(CIBSDE):
-    def __init__(self, d, t, f, mu, sigma, pc, data_gen, N, refb, hitb, param=False):
-        super().__init__(d, t, f, mu, sigma, pc, data_gen, N, refb, hitb, param)
+    def __init__(self, d, t, f, mu, sigma, h, pc, data_gen, N, refb, hitb, param=False):
+        super().__init__(d, t, f, mu, sigma, h, pc, data_gen, N, refb, hitb, param)
         if param:
             self.p = utils.Parameter(1)
         else:
@@ -57,8 +53,9 @@ class BoundaryIBSDE(CIBSDE):
             f = self.f(i*self.dt,xt,p_pre,grad_p)
             mu = self.mu(i*self.dt,xt)
             sigma = self.sigma(i*self.dt,xt)
-            xt, hit = self.const_sde(xt,mu,sigma,dBt[i],run)
-            p_pre = self.const_bsde(p_pre,grad_p,f,sigma,dBt[i],run)
+            xt, xb, dRt, ref, hit = self.const_sde(xt,mu,sigma,dBt[i],run)
+            h = self.h(i*self.dt,xb)
+            p_pre = self.const_bsde(p_pre,grad_p,f,h,sigma,dBt[i],dRt,ref,run)
             p_rel[run*hit] = self.pc(i,xt)[run*hit]
             run = run * (~hit)
         p_rel[run] = self.pc(self.N,xt)[run]
@@ -67,20 +64,22 @@ class BoundaryIBSDE(CIBSDE):
     def const_sde(self, xt, mu, sigma, dBt, run):
         dxt = mu*self.dt + torch.bmm(sigma,dBt.unsqueeze(-1)).squeeze(-1)
         xt = xt + dxt*run.unsqueeze(1)
-        xt = self.mirror_reflect(xt)
+        xb, nb, ref = self.refb(xt)
+        dRt = 2*((xb-xt)*(-nb)).sum(dim=1,keepdim=True)
+        xt[ref] = xt[ref] + dRt[ref]*(-nb[ref])
         hit = self.hitb(xt)
-        return xt, hit
+        return xt, xb, dRt, ref, hit
     
-    def const_bsde(self, p, grad_p, f, sigma, dBt, run):
+    def const_bsde(self, p, grad_p, f, h, sigma, dBt, dRt, ref, run):
         grad_p = torch.bmm(grad_p.unsqueeze(1),sigma).squeeze(1)
-        dp = -f*self.dt + (grad_p*dBt).sum(dim=1,keepdim=True)
-        p = p + dp*run.unsqueeze(1)
+        dp = - f*self.dt + (grad_p*dBt).sum(dim=1,keepdim=True) - h*dRt*ref[:,None]
+        p = p + dp*run[:,None]
         return p
 
 
 class SphereIBSDE(CIBSDE):
-    def __init__(self, dx, t, f, D, pc, data_gen, N, refb, hitb, param=False):
-        super().__init__(3*dx, t, f, None, None, pc, data_gen, N, refb, hitb, param)
+    def __init__(self, dx, t, f, D, h, pc, data_gen, N, refb, hitb, param=False):
+        super().__init__(3*dx, t, f, None, None, h, pc, data_gen, N, refb, hitb, param)
         self.dx = dx
         self.D = D
         self.fix_x = nn.Parameter(torch.tensor([1.,0,0]),requires_grad=False)
@@ -100,8 +99,9 @@ class SphereIBSDE(CIBSDE):
         for i in range(self.N):
             grad_p = self.grad_p[i](xt)
             f = self.f(i*self.dt,xt,p_pre)
-            xt, hit, T_inv = self.const_sde(xt,dBt[i],run)
-            p_pre = self.const_bsde(p_pre,grad_p,f,T_inv,dBt[i],run)
+            xt, xb, dRt, ref, hit, T_inv = self.const_sde(xt,dBt[i],run)
+            h = self.h(i*self.dt,xb)
+            p_pre = self.const_bsde(p_pre,grad_p,f,h,T_inv,dBt[i],dRt,ref,run)
             p_rel[run*hit] = self.pc(i,xt)[run*hit]
             run = run * (~hit)
         p_rel[run] = self.pc(self.N,xt)[run]
@@ -116,22 +116,24 @@ class SphereIBSDE(CIBSDE):
         dxt = utils.euclid_corr(dxt.reshape([B*self.dx,2])) - self.fix_x
         dxt = torch.bmm(T_inv,dxt.unsqueeze(-1)).squeeze(-1)
         xt = xt + dxt*run.unsqueeze(1).expand([B,self.dx]).reshape([B*self.dx,1])
-        xt = self.mirror_reflect(xt)
+        xb, nb, ref = self.refb(xt)
+        dRt = 2*((xb-xt)*(-nb)).sum(dim=1,keepdim=True)
+        xt[ref] = xt[ref] + dRt[ref]*(-nb[ref])
         hit = self.hitb(xt)
-        return xt.reshape([B,self.d]), hit, T_inv
+        return xt.reshape([B,self.d]), xb.reshape([B,self.d]), dRt, ref, hit, T_inv
     
-    def const_bsde(self, p, grad_p, f, T_inv, dBt, run):
+    def const_bsde(self, p, grad_p, f, h, T_inv, dBt, dRt, ref, run):
         B = p.shape[0]
         grad_p = torch.bmm(grad_p.reshape([B*self.dx,1,3]),T_inv)
         grad_p = torch.bmm(grad_p,self.grad_eucl_polar.expand([B*self.dx,3,2])).reshape([B,self.dx*2])
-        dp = -f*self.dt + (grad_p*(torch.sqrt(2*self.D).unsqueeze(1)*dBt).reshape([B,self.dx*2])).sum(dim=1,keepdim=True)
+        dp = - f*self.dt + (grad_p*(torch.sqrt(2*self.D).unsqueeze(1)*dBt).reshape([B,self.dx*2])).sum(dim=1,keepdim=True) - h*(dRt*ref[:,None]).view(B,-1).sum(dim=-1,keepdim=True)
         p = p + dp*run.unsqueeze(1)
         return p
 
 
 class ConstaintIBSDE(CIBSDE):
-    def __init__(self, dx, dy, t, f, mu, sigma, Dx, pc, data_gen, N, refb, hitb, params=False):
-        super().__init__(3*dx+dy, t, f, mu, sigma, pc, data_gen, N, refb, hitb)
+    def __init__(self, dx, dy, t, f, mu, sigma, Dx, h, pc, data_gen, N, refb, hitb, params=False):
+        super().__init__(3*dx+dy, t, f, mu, sigma, h, pc, data_gen, N, refb, hitb)
         self.dx = dx
         self.dy = dy
         self.Dx = Dx
@@ -156,8 +158,9 @@ class ConstaintIBSDE(CIBSDE):
             f = self.f(i*self.dt,xt,yt,p_pre,grad_p[:,self.dx*3:])
             mu = self.mu(i*self.dt,yt)
             sigma = self.sigma(i*self.dt,yt)
-            xt, yt, hit, T_inv = self.const_sde(xt,yt,mu,sigma,dBxt[i],dByt[i],run)
-            p_pre = self.const_bsde(p_pre,grad_p,f,sigma,T_inv,dBxt[i],dByt[i],run)
+            xt, yt, xb, yb, dRxt, dRyt, refx, refy, hit, T_inv = self.const_sde(xt,yt,mu,sigma,dBxt[i],dByt[i],run)
+            h = self.h(i*self.dt,xb,yb)
+            p_pre = self.const_bsde(p_pre,grad_p,f,h,sigma,T_inv,dBxt[i],dByt[i],dRxt,dRyt,refx,refy,run)
             p_rel[run*hit] = self.pc(i,xt,yt)[run*hit]
             run = run * (~hit)
         p_rel[run] = self.pc(self.N,xt,yt)[run]
@@ -174,26 +177,24 @@ class ConstaintIBSDE(CIBSDE):
         xt = xt + dxt*run.unsqueeze(1).expand([B,self.dx]).reshape([B*self.dx,1])
         dyt = mu*self.dt + torch.bmm(sigma,dByt.unsqueeze(-1)).squeeze(-1)
         yt = yt + dyt*run.unsqueeze(1)
-        xt, yt = self.mirror_reflect(xt,yt)
+        xb, nxb, refx, yb, nyb, refy = self.refb(xt,yt)
+        dRxt = 2*((xb-xt)*(-nxb)).sum(dim=1,keepdim=True)
+        dRyt = 2*((yb-yt)*(-nyb)).sum(dim=1,keepdim=True)
+        xt[refx] = xt[refx] + (-nxb[refx])*dRxt[refx]
+        yt[refy] = yt[refy] + (-nyb[refy])*dRyt[refy]
         hit = self.hitb(xt,yt)
-        return xt.reshape([B,self.dx*3]), yt, hit, T_inv
+        return xt.reshape([B,self.dx*3]), yt, xb.reshape([B,self.dx*3]), yb, dRxt, dRyt, refx, refy, hit, T_inv
     
-    def const_bsde(self, p, grad_p, f, sigma, T_inv, dBxt, dByt, run):
+    def const_bsde(self, p, grad_p, f, h, sigma, T_inv, dBxt, dByt, dRxt, dRyt, refx, refy, run):
         B = p.shape[0]
         gradx_p = grad_p[:,:self.dx*3]
         grady_p = grad_p[:,self.dx*3:]
         gradx_p = torch.bmm(gradx_p.reshape([B*self.dx,1,3]),T_inv)
         gradx_p = torch.bmm(gradx_p,self.grad_eucl_polar.expand([B*self.dx,3,2])).reshape([B,self.dx*2])
         grady_p = torch.bmm(grady_p.unsqueeze(1),sigma).squeeze(1)
-        dp = -f*self.dt + (gradx_p*(torch.sqrt(2*self.Dx).unsqueeze(1)*dBxt).reshape([B,self.dx*2])).sum(dim=1,keepdim=True) + (grady_p*dByt).sum(dim=1,keepdim=True)
+        dp = - f*self.dt + (gradx_p*(torch.sqrt(2*self.Dx).unsqueeze(1)*dBxt).reshape([B,self.dx*2])).sum(dim=1,keepdim=True) + (grady_p*dByt).sum(dim=1,keepdim=True) - h*((dRxt*refx[:,None]).view(B,-1).sum(dim=-1,keepdim=True) + dRyt*refy[:,None])
         p = p + dp*run.unsqueeze(1)
         return p
-    
-    def mirror_reflect(self, xt, yt):
-        xb, nxb, outx, yb, nyb, outy = self.refb(xt,yt)
-        xt[outx] = xt[outx] + 2*((xb[outx]-xt[outx])*(-nxb[outx])).sum(dim=1,keepdim=True)*(-nxb[outx])
-        yt[outy] = yt[outy] + 2*((yb[outy]-yt[outy])*(-nyb[outy])).sum(dim=1,keepdim=True)*(-nyb[outy])
-        return xt, yt
 
 
 def train(model, params:dict):
@@ -205,8 +206,8 @@ def train(model, params:dict):
     loss_fun = nn.MSELoss()
     
     loss_values = torch.zeros(epoch)
-    start = time.time()
-    for i in range(epoch):
+    pbar = tqdm(range(epoch))
+    for i in pbar:
         model.train()
         optim.zero_grad()
         u_pre, u_rel = model(batch)
@@ -216,11 +217,6 @@ def train(model, params:dict):
 
         model.eval()
         loss_values[i] = loss.item()
-        print('\r%5d/{}|{}{}|{:.2f}s  [Loss: %e]'.format(
-            epoch,
-            "#"*int((i+1)/epoch*50),
-            " "*(50-int((i+1)/epoch*50)),
-            time.time() - start) %
-            (i+1,loss_values[i]), end = ' ', flush=True)
+        pbar.set_postfix(loss='%e' % loss_values[i])
     print("\nTraining has been completed.")
     return loss_values
