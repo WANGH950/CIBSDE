@@ -24,17 +24,13 @@ We provide some invocation `example` in files with the `".ipynb"` extension, whe
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-<!-- ## Citation
+## Citation
 
 If you use this code in your research, please cite:
 ```bibtex
 @article{Wang2026,
   title = {Deep learning for high-dimensional PDEs on manifold with Neumann and Dirichlet boundary conditions},
-  journal = {Journal of Computational Physics},
-  volume = {541},
-  pages = {114327},
-  year = {2026},
-  issn = {0021-9991},
-  doi = {10.1016/j.jcp.2025.114327}
+  author = {Wang, Heng and Deng, Weihua},
+  url = {https://github.com/WANGH950/CIBSDE}
 }
-``` -->
+```
