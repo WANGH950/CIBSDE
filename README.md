@@ -21,7 +21,9 @@ The deep backward stochastic differential equation (BSDE) method is a deep learn
 ## Project Structure
 
 ```
-├── cibsde/                     # Model definitions
+├── cibsde/                     # Constraint-Informed BSDE method
+│ ├── nn.py                     # Neural networks module
+│ └── utils.py                  # Some useful tools
 ├── datasets/                   # Reference solutions
 ├── figures/                    # Figure outputs
 ├── Example1.ipynb              # Burgers' equation
