@@ -52,6 +52,10 @@ If you use this code in your research, please cite:
 @article{Wang2026,
   title = {Deep learning for high-dimensional PDEs on manifold with Neumann and Dirichlet boundary conditions},
   author = {Wang, Heng and Deng, Weihua},
-  url = {https://github.com/WANGH950/CIBSDE}
+  volume = {48},
+  number = {5},
+  pages = {C1380-C1402},
+  year = {2026},
+  doi = {10.1137/25M1826822}
 }
 ```
